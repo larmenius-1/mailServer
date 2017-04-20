@@ -7,6 +7,8 @@ import smtpd
 import asyncore
 import sqlite3
 import os
+import sys
+import argparse
 
 
 # check if database exists, create it otherwise
@@ -78,6 +80,79 @@ def loadConfig() :
 	return cfg
 
 
+# parse command line args
+def commandLine() :
+	parser=argparse.ArgumentParser()
+	group=parser.add_mutually_exclusive_group(required=True)
+	group.add_argument("-add", nargs=2, metavar=("user@domain.xxx", "password"), help="Crée un utilisateur")
+	group.add_argument("-delete", nargs=1, metavar="USER", help="Supprime un utilisateur")
+	group.add_argument("-list", action="store_true", help="Liste les utilisateurs")
+	group.add_argument("-dump", nargs=1, metavar="USER", help="Liste les messages d'un utilisateur")
+	group.add_argument("-start", action="store_true", help="Démarre le serveur")
+
+	return parser.parse_args()
+#	print(opts)
+#	print(opts.add)
+#	print(opts.delete)
+#	print(opts.list)
+#	print(opts.dump)
+#	print(opts.start)
+	
+
+"""
+import argparse
+
+# Use nargs to specify how many arguments an option should take.
+ap = argparse.ArgumentParser()
+ap.add_argument('-a', nargs=2)
+ap.add_argument('-b', nargs=3)
+ap.add_argument('-c', nargs=1)
+
+# An illustration of how access the arguments.
+opts = ap.parse_args('-a A1 A2 -b B1 B2 B3 -c C1'.split())
+
+print(opts)
+print(opts.a)
+print(opts.b)
+print(opts.c)
+
+# To require that at least one option be supplied (-a, -b, or -c)
+# you have to write your own logic. For example:
+opts = ap.parse_args([])
+if not any([opts.a, opts.b, opts.c]):
+    ap.print_usage()
+    quit()
+
+#
+# Use nargs to specify how many arguments an option should take.
+ap = argparse.ArgumentParser()
+group = ap.add_mutually_exclusive_group(required=True)
+group.add_argument('-a', nargs=2)
+group.add_argument('-b', nargs=3)
+group.add_argument('-c', nargs=1)
+
+
+# Grab the opts from argv
+opts = ap.parse_args()
+
+# This line will not be reached if none of a/b/c are specified.
+# Usage/help will be printed instead.
+
+print(opts)
+print(opts.a)
+print(opts.b)
+print(opts.c)
+"""
+
+# execute the line parameters commands
+def executeCommand(options) :
+	# on rend la main pour demarrer le serveur
+	if options.start :
+		return
+
+	exit(1)
+
+
 # main
 
 if __name__ == "__main__" :
@@ -86,11 +161,18 @@ if __name__ == "__main__" :
 
 	config=loadConfig()
 	logger.debug("{0}".format(config))
-	checkDatabase()
-	server = CustomSMTPServer((config["server"], config["smtp.port"]), None)
-	#print("{0}".format(server));
 
-	logger.info("--- Start on {0}:{1} ---".format(config["server"], config["smtp.port"]))
-	#asyncore.loop()
-	logger.info("--- Stop ---")
+	checkDatabase()
+
+	options=commandLine()
+	executeCommand(options)
+
+	if options.start :
+		#server = CustomSMTPServer((config["server"], config["smtp.port"]), None)
+		#print(server);
+		print("starting")
+
+		logger.info("--- Start on {0}:{1} ---".format(config["server"], config["smtp.port"]))
+		#asyncore.loop()
+		logger.info("--- Stop ---")
 
