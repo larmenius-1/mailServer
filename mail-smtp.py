@@ -9,59 +9,43 @@ import sqlite3
 import os
 import sys
 import argparse
+import signal
 
 
-# check if database exists, create it otherwise
-def checkDatabase() :
-	database_name = config["database"]
-	print("Database : {0}".format(database_name))
-	if not os.path.isfile(database_name):
-		logger.warning("Database {} does not exist -> Creation".format(database_name))
-	else :
-		logger.info("Checking database {}".format(database_name))
-	db = sqlite3.connect(database_name)
-	cursor = db.cursor()
-	cursor.execute("CREATE TABLE IF NOT EXISTS user (id INTEGER PRIMARY KEY, login TEXT, password TEXT)")
-	cursor.execute("CREATE TABLE IF NOT EXISTS mail (id INTEGER PRIMARY KEY, user INTEGER, body TEXT)")
-	db.close
-
-#import sqlite3
-#conn = sqlite3.connect('example.db')
-#c = conn.cursor()
-# Create table
-#c.execute('''CREATE TABLE stocks(date text, trans text, symbol text, qty real, price real)''')
-
-# Insert a row of data
-#c.execute("INSERT INTO stocks VALUES ('2006-01-05','BUY','RHAT',100,35.14)")
-
-# Save (commit) the changes
-#conn.commit()
-
-# We can also close the connection if we are done with it.
-# Just be sure any changes have been committed or they will be lost.
-#conn.close()
-
-#t = ('RHAT',)
-#c.execute('SELECT * FROM stocks WHERE symbol=?', t)
-#print c.fetchone()
-#for row in c.execute('SELECT * FROM stocks ORDER BY price'):
-#        print row
 
 ####
 
 class CustomSMTPServer(smtpd.SMTPServer) :
-    
-    def process_message(self, peer, mailfrom, rcpttos, data):
-        logger.debug("Receiving message from: {0}".format(peer))
-        logger.debug("Message addressed from: {} to {}".format(mailfrom,rcpttos))
-        logger.debug("Message length : {} \n{}\n".format(len(data),data))
-        return
+
+	def process_message(self, peer, mailfrom, rcpttos, data):
+		logger.debug("Receiving message from: {0}".format(peer))
+		logger.debug("Message addressed from: {0} to {1}".format(mailfrom,rcpttos))
+		logger.debug("Message length : {0} \n{1}\n".format(len(data),data))
+
+		print("Message addressed from: {0} to {1}".format(mailfrom,rcpttos))
+		print("Message length : {0} \n{1}".format(len(data),data))
+		print("---")
+
+		db = sqlite3.connect(config["database"])
+		cursor = db.cursor()
+		# on duplique le message pour chaque destinataire
+		for login in rcpttos :
+			cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+			user = cursor.fetchone()
+			if None == user :
+				logger.warning("Utilisateur {0} inconnu !".format(login))
+				continue
+			cursor.execute("INSERT INTO mail(mail_address, mail_body) VALUES(?, ?)", (login, data))
+
+		db.commit()
+		db.close()
+		return
 
 ####
 
 # load configuration, with default values when not found
 def loadConfig() :
-	logger.info("Lecture de la configuration")
+	logger.info("Lecture de la configuration.")
 
 	config=configparser.ConfigParser()
 	config.read("mail.ini")
@@ -69,7 +53,7 @@ def loadConfig() :
 	try :
 		section=config["mail"]
 	except KeyError as exception :
-		logger.critical("Paramètres inconnus -> valeurs par défaut")
+		logger.critical("Paramètres inconnus -> valeurs par défaut.")
 		section = {}
 
 	cfg={}
@@ -85,64 +69,14 @@ def commandLine() :
 	parser=argparse.ArgumentParser()
 	group=parser.add_mutually_exclusive_group(required=True)
 	group.add_argument("-add", nargs=2, metavar=("user@domain.xxx", "password"), help="Crée un utilisateur")
-	group.add_argument("-delete", nargs=1, metavar="USER", help="Supprime un utilisateur")
+	group.add_argument("-delete", nargs=1, metavar="user@domain.xxx", help="Supprime un utilisateur")
 	group.add_argument("-list", action="store_true", help="Liste les utilisateurs")
-	group.add_argument("-dump", nargs=1, metavar="USER", help="Liste les messages d'un utilisateur")
+#	group.add_argument("-dump", nargs=1, metavar="user@domain.xxx", help="Liste les messages d'un utilisateur")
+	group.add_argument("-clear", nargs=1, metavar="user@domain.xxx", help="Supprime les messages d'un utilisateur")
 	group.add_argument("-start", action="store_true", help="Démarre le serveur")
 
 	return parser.parse_args()
-#	print(opts)
-#	print(opts.add)
-#	print(opts.delete)
-#	print(opts.list)
-#	print(opts.dump)
-#	print(opts.start)
 	
-
-"""
-import argparse
-
-# Use nargs to specify how many arguments an option should take.
-ap = argparse.ArgumentParser()
-ap.add_argument('-a', nargs=2)
-ap.add_argument('-b', nargs=3)
-ap.add_argument('-c', nargs=1)
-
-# An illustration of how access the arguments.
-opts = ap.parse_args('-a A1 A2 -b B1 B2 B3 -c C1'.split())
-
-print(opts)
-print(opts.a)
-print(opts.b)
-print(opts.c)
-
-# To require that at least one option be supplied (-a, -b, or -c)
-# you have to write your own logic. For example:
-opts = ap.parse_args([])
-if not any([opts.a, opts.b, opts.c]):
-    ap.print_usage()
-    quit()
-
-#
-# Use nargs to specify how many arguments an option should take.
-ap = argparse.ArgumentParser()
-group = ap.add_mutually_exclusive_group(required=True)
-group.add_argument('-a', nargs=2)
-group.add_argument('-b', nargs=3)
-group.add_argument('-c', nargs=1)
-
-
-# Grab the opts from argv
-opts = ap.parse_args()
-
-# This line will not be reached if none of a/b/c are specified.
-# Usage/help will be printed instead.
-
-print(opts)
-print(opts.a)
-print(opts.b)
-print(opts.c)
-"""
 
 # execute the line parameters commands
 def executeCommand(options) :
@@ -150,11 +84,132 @@ def executeCommand(options) :
 	if options.start :
 		return
 
+	database_name = config["database"]
+
+	# ajout d'un utilisateur
+	if options.add :
+		login, password = options.add
+		db = sqlite3.connect(database_name)
+		cursor = db.cursor()
+		cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+		user = cursor.fetchone()
+		if user :
+			message = "Utilisateur {0} déjà défini !".format(login)
+			print("{0}\n".format(message))
+			logger.error(message)
+			exit(1)
+		else :
+			cursor.execute("INSERT INTO user(login,password) VALUES(?,?)", (login, password))
+			message = "Utilisateur {0} créé.".format(login)
+			print("{0}\n".format(message))
+			logger.info(message)
+			db.commit()
+		db.close()
+		exit(0)
+
+	# liste des utilisateurs
+	if options.list :
+		db = sqlite3.connect(database_name)
+		cursor = db.cursor()
+		cursor.execute("SELECT * FROM user ORDER BY login")
+		data = cursor.fetchall()
+		if 0 == len(data) :
+			print("Aucun utilisateur défini\n")
+		else :
+			print("{0:40} : {1}".format("Login","Msg"))
+			print("{} : {}".format("-" * 40, "-" * 3))
+			for user in data :
+				login = user[1]
+				cursor.execute("SELECT COUNT(id) FROM mail where mail_address = ?", (login,))
+				nbMessages = cursor.fetchone()[0]
+				print("{0:40} : {1:>3}".format(login, nbMessages))
+			print()
+		db.close()
+		exit(0)
+		
+	# suppression d'un utilisateur
+	if options.delete :
+		login = options.delete[0]
+		db = sqlite3.connect(database_name)
+		cursor = db.cursor()
+		cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+		user = cursor.fetchone()
+		if None == user :
+			print("Utilisateur {0} inconnu !\n".format(login))
+		else :
+			nbMessages = cursor.execute("DELETE FROM mail WHERE mail_address = ?", (login,)).rowcount
+			message = "{0} messages supprimés".format(nbMessages)
+			logger.info(message)
+			print(message)
+			cursor.execute("DELETE FROM user WHERE login = ?", (login,))
+			db.commit()
+			message = "Utilisateur {0} supprimé".format(login)
+			logger.info(message)
+			print(message)
+		db.close()
+		exit(0)
+
+	# suppression des messages d'un utilisateur
+	if options.clear :
+		login = options.clear[0]
+		db = sqlite3.connect(database_name)
+		cursor = db.cursor()
+		cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+		user = cursor.fetchone()
+		if None == user :
+			print("Utilisateur {0} inconnu !\n".format(login))
+		else :
+			nbMessages = cursor.execute("DELETE FROM mail WHERE mail_address = ?", (login,)).rowcount
+			db.commit()
+			message = "{0} messages supprimés pour {1}".format(nbMessages,login)
+			logger.info(message)
+			print(message)
+		db.close()
+		exit(0)
+
+	# on a rien traité, on sort
 	exit(1)
 
 
-# main
+# check existence of user/login in database
+def checkUser(login) :
+	if None == login :
+		logger.error("Utilisateur non défini.")
+		return False
 
+	db = sqlite3.connect(config["database"])
+	cursor = db.cursor()
+	cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+	user = cursor.fetchone()
+	db.close()
+	return None != user 
+
+
+# check if database exists, create it otherwise
+def checkDatabase() :
+	database_name = config["database"]
+	if not os.path.isfile(database_name):
+		logger.warning("Database {0} does not exist -> Creation.".format(database_name))
+	else :
+		logger.info("Checking database {0}.".format(database_name))
+	db = sqlite3.connect(database_name)
+	cursor = db.cursor()
+	cursor.execute("CREATE TABLE IF NOT EXISTS user (id INTEGER PRIMARY KEY, login TEXT, password TEXT)")
+	cursor.execute("CREATE TABLE IF NOT EXISTS mail (id INTEGER PRIMARY KEY, mail_address TEXT, mail_body TEXT)")
+	db.close()
+
+
+def exitGracefully(signum, frame) :
+	# restore the original signal handler as otherwise evil things will happen 
+	# and our signal handler is not re-entrant
+	signal.signal(signal.SIGTERM, original_sigterm)
+	signal.signal(signal.SIGINT, original_sigint)
+	smtpServer.close()
+#	popServer.close()
+
+####
+
+# main
 if __name__ == "__main__" :
 	logging.config.fileConfig("mail.ini")
 	logger=logging.getLogger("root")
@@ -168,11 +223,17 @@ if __name__ == "__main__" :
 	executeCommand(options)
 
 	if options.start :
-		#server = CustomSMTPServer((config["server"], config["smtp.port"]), None)
+		# store the original signal handlers
+		original_sigterm = signal.getsignal(signal.SIGTERM)
+		signal.signal(signal.SIGTERM, exitGracefully)
+		original_sigint = signal.getsignal(signal.SIGINT)
+		signal.signal(signal.SIGINT, exitGracefully)
+
+		smtpServer = CustomSMTPServer((config["server"], config["smtp.port"]), None)
 		#print(server);
 		print("starting")
 
 		logger.info("--- Start on {0}:{1} ---".format(config["server"], config["smtp.port"]))
-		#asyncore.loop()
+		asyncore.loop()
 		logger.info("--- Stop ---")
 
