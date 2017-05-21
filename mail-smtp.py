@@ -18,24 +18,25 @@ import signal
 class CustomSMTPServer(smtpd.SMTPServer) :
 
 	def process_message(self, peer, mailfrom, rcpttos, data):
+		length = len(data)
 		logger.debug("Receiving message from: {0}".format(peer))
 		logger.debug("Message addressed from: {0} to {1}".format(mailfrom,rcpttos))
-		logger.debug("Message length : {0} \n{1}\n".format(len(data),data))
+		logger.debug("Message length : {0} \n{1}\n".format(length,data))
 
 		print("Message addressed from: {0} to {1}".format(mailfrom,rcpttos))
-		print("Message length : {0} \n{1}".format(len(data),data))
+		print("Message length : {0} \n{1}".format(length,data))
 		print("---")
 
 		db = sqlite3.connect(config["database"])
 		cursor = db.cursor()
 		# on duplique le message pour chaque destinataire
-		for login in rcpttos :
-			cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+		for email in rcpttos :
+			cursor.execute("SELECT email FROM user WHERE email = ?", (email,))
 			user = cursor.fetchone()
 			if None == user :
-				logger.warning("Utilisateur {0} inconnu !".format(login))
+				logger.warning("Utilisateur {0} inconnu !".format(email))
 				continue
-			cursor.execute("INSERT INTO mail(mail_address, mail_body) VALUES(?, ?)", (login, data))
+			cursor.execute("INSERT INTO mail(mail_address, length, mail_body) VALUES(?, ?, ?)", (email, length, data))
 
 		db.commit()
 		db.close()
@@ -74,6 +75,8 @@ def commandLine() :
 #	group.add_argument("-dump", nargs=1, metavar="user@domain.xxx", help="Liste les messages d'un utilisateur")
 	group.add_argument("-clear", nargs=1, metavar="user@domain.xxx", help="Supprime les messages d'un utilisateur")
 	group.add_argument("-start", action="store_true", help="Démarre le serveur")
+	# only for help
+	group.add_argument("-stop", action="store_true", help="Arrête le serveur")
 
 	return parser.parse_args()
 	
@@ -88,19 +91,19 @@ def executeCommand(options) :
 
 	# ajout d'un utilisateur
 	if options.add :
-		login, password = options.add
+		email, password = options.add
 		db = sqlite3.connect(database_name)
 		cursor = db.cursor()
-		cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+		cursor.execute("SELECT email FROM user WHERE email = ?", (email,))
 		user = cursor.fetchone()
 		if user :
-			message = "Utilisateur {0} déjà défini !".format(login)
+			message = "Utilisateur {0} déjà défini !".format(email)
 			print("{0}\n".format(message))
 			logger.error(message)
 			exit(1)
 		else :
-			cursor.execute("INSERT INTO user(login,password) VALUES(?,?)", (login, password))
-			message = "Utilisateur {0} créé.".format(login)
+			cursor.execute("INSERT INTO user(email,password) VALUES(?,?)", (email, password))
+			message = "Utilisateur {0} créé.".format(email)
 			print("{0}\n".format(message))
 			logger.info(message)
 			db.commit()
@@ -111,39 +114,39 @@ def executeCommand(options) :
 	if options.list :
 		db = sqlite3.connect(database_name)
 		cursor = db.cursor()
-		cursor.execute("SELECT * FROM user ORDER BY login")
+		cursor.execute("SELECT email FROM user ORDER BY email")
 		data = cursor.fetchall()
 		if 0 == len(data) :
 			print("Aucun utilisateur défini\n")
 		else :
-			print("{0:40} : {1}".format("Login","Msg"))
+			print("{0:40} : {1}".format("email","Msg"))
 			print("{} : {}".format("-" * 40, "-" * 3))
 			for user in data :
-				login = user[1]
-				cursor.execute("SELECT COUNT(id) FROM mail where mail_address = ?", (login,))
+				email = user[0]
+				cursor.execute("SELECT COUNT(id) FROM mail where mail_address = ?", (email,))
 				nbMessages = cursor.fetchone()[0]
-				print("{0:40} : {1:>3}".format(login, nbMessages))
+				print("{0:40} : {1:>3}".format(email, nbMessages))
 			print()
 		db.close()
 		exit(0)
 		
 	# suppression d'un utilisateur
 	if options.delete :
-		login = options.delete[0]
+		email = options.delete[0]
 		db = sqlite3.connect(database_name)
 		cursor = db.cursor()
-		cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+		cursor.execute("SELECT email FROM user WHERE email = ?", (email,))
 		user = cursor.fetchone()
 		if None == user :
-			print("Utilisateur {0} inconnu !\n".format(login))
+			print("Utilisateur {0} inconnu !\n".format(email))
 		else :
-			nbMessages = cursor.execute("DELETE FROM mail WHERE mail_address = ?", (login,)).rowcount
+			nbMessages = cursor.execute("DELETE FROM mail WHERE mail_address = ?", (email,)).rowcount
 			message = "{0} messages supprimés".format(nbMessages)
 			logger.info(message)
 			print(message)
-			cursor.execute("DELETE FROM user WHERE login = ?", (login,))
+			cursor.execute("DELETE FROM user WHERE email = ?", (email,))
 			db.commit()
-			message = "Utilisateur {0} supprimé".format(login)
+			message = "Utilisateur {0} supprimé".format(email)
 			logger.info(message)
 			print(message)
 		db.close()
@@ -151,17 +154,17 @@ def executeCommand(options) :
 
 	# suppression des messages d'un utilisateur
 	if options.clear :
-		login = options.clear[0]
+		email = options.clear[0]
 		db = sqlite3.connect(database_name)
 		cursor = db.cursor()
-		cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+		cursor.execute("SELECT email FROM user WHERE email = ?", (email,))
 		user = cursor.fetchone()
 		if None == user :
-			print("Utilisateur {0} inconnu !\n".format(login))
+			print("Utilisateur {0} inconnu !\n".format(email))
 		else :
-			nbMessages = cursor.execute("DELETE FROM mail WHERE mail_address = ?", (login,)).rowcount
+			nbMessages = cursor.execute("DELETE FROM mail WHERE mail_address = ?", (email,)).rowcount
 			db.commit()
-			message = "{0} messages supprimés pour {1}".format(nbMessages,login)
+			message = "{0} messages supprimés pour {1}".format(nbMessages,email)
 			logger.info(message)
 			print(message)
 		db.close()
@@ -171,15 +174,15 @@ def executeCommand(options) :
 	exit(1)
 
 
-# check existence of user/login in database
-def checkUser(login) :
-	if None == login :
+# check existence of user/email in database
+def checkUser(email) :
+	if None == email :
 		logger.error("Utilisateur non défini.")
 		return False
 
 	db = sqlite3.connect(config["database"])
 	cursor = db.cursor()
-	cursor.execute("SELECT login FROM user WHERE login = ?", (login,))
+	cursor.execute("SELECT email FROM user WHERE email = ?", (email,))
 	user = cursor.fetchone()
 	db.close()
 	return None != user 
@@ -194,8 +197,8 @@ def checkDatabase() :
 		logger.info("Checking database {0}.".format(database_name))
 	db = sqlite3.connect(database_name)
 	cursor = db.cursor()
-	cursor.execute("CREATE TABLE IF NOT EXISTS user (id INTEGER PRIMARY KEY, login TEXT, password TEXT)")
-	cursor.execute("CREATE TABLE IF NOT EXISTS mail (id INTEGER PRIMARY KEY, mail_address TEXT, mail_body TEXT)")
+	cursor.execute("CREATE TABLE IF NOT EXISTS user (id INTEGER PRIMARY KEY, email TEXT, password TEXT)")
+	cursor.execute("CREATE TABLE IF NOT EXISTS mail (id INTEGER PRIMARY KEY, mail_address TEXT, length INTEGER, mail_body TEXT)")
 	db.close()
 
 
